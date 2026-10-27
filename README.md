@@ -50,6 +50,7 @@ next time the panel or the menu is opened; nothing needs restarting.
 | `oshelly list --json` | The same, for a panel or a menu bar app to read |
 | `oshelly run <name>` | Launch one command in the default terminal |
 | `oshelly edit` | Open the config in the default editor |
+| `oshelly terminal [name]` | Show or save the terminal used on this platform |
 | `oshelly path` | Print the config file's location |
 | `oshelly doctor` | Check the file parses and the terminal and editor can be found |
 
@@ -78,14 +79,33 @@ useful than "it failed":
 
 `oshelly` uses, in order:
 
-1. `OSHELLY_TERMINAL`, if it is set. A value that cannot be found is an error
-   rather than a silent fallback, because the setting exists to choose this.
-2. `omarchy-launch-terminal` on Omarchy. This starts the terminal through
+1. `OSHELLY_TERMINAL`, if it is set. This is a session override, and a value
+   that cannot be found is an error rather than a silent fallback.
+2. The saved choice from `oshelly terminal`.
+3. `omarchy-launch-terminal` on Omarchy. This starts the terminal through
    `uwsm`, in the active terminal's working directory.
-3. `xdg-terminal-exec`, the cross-desktop default-terminal utility.
-4. `$TERMINAL`, if it names something installed.
-5. The first of `ghostty`, `alacritty`, `kitty`, `foot`, `wezterm`, `konsole`,
+4. `xdg-terminal-exec`, the cross-desktop default-terminal utility.
+5. `$TERMINAL`, if it names something installed.
+6. The first of `ghostty`, `alacritty`, `kitty`, `foot`, `wezterm`, `konsole`,
    `gnome-terminal`, `xfce4-terminal`, `xterm`.
+
+### Saving a choice
+
+```sh
+oshelly terminal            # show the choice for this machine
+oshelly terminal Ghostty    # macOS: an application name
+oshelly terminal ghostty    # Linux: a program name
+oshelly terminal default    # go back to choosing automatically
+```
+
+The choice is stored per platform in `~/.config/oshelly/settings.json`, next to
+the command list. A Mac and a Linux machine can share the file because
+"Ghostty" is an application name on one and a program name on the other.
+
+On macOS, a saved application is passed to `open -a`, which hands the
+`.command` file to that application. Ghostty runs it through its own file
+handler, so no Ghostty-specific command line is needed. On Linux, the saved
+name is looked up like any other terminal.
 
 On Linux, `OSHELLY_TERMINAL` is an executable path or name. On macOS it is an
 application name or bundle path, passed to `open -a`, and the default is
@@ -154,6 +174,9 @@ file works on both machines.
 OSHELLY_CONFIG=~/Dropbox/oshelly.conf oshelly list
 OSHELLY_CONFIG=~/Dropbox/oshelly oshelly list
 ```
+
+The terminal choice lives in `settings.json` in the same directory, so moving
+`OSHELLY_CONFIG` moves both files.
 
 ## Install
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -138,6 +139,70 @@ func TestRunSaysWhatIsConfiguredWhenTheNameIsWrong(t *testing.T) {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr does not contain %q: %q", want, stderr)
 		}
+	}
+}
+
+// A broken settings file must not hide the command list or the Terminal
+// submenu. Choosing a terminal rewrites the file.
+func TestListSurvivesBrokenSettings(t *testing.T) {
+	path := configFile(t, "Restart: true\n")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "settings.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := invoke("list", "--json")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, `"name": "Restart"`) {
+		t.Errorf("the command list was hidden:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "settings not usable") {
+		t.Errorf("stderr = %q, want the settings error", stderr)
+	}
+}
+
+func TestTerminalChoiceIsStoredForThisPlatform(t *testing.T) {
+	path := configFile(t, "Restart: true\n")
+
+	code, stdout, stderr := invoke("terminal", "Ghostty")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "terminal = Ghostty") {
+		t.Errorf("stdout = %q", stdout)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "settings.json"))
+	if err != nil {
+		t.Fatalf("the settings file was not written: %v", err)
+	}
+	if !strings.Contains(string(raw), `"`+runtime.GOOS+`": "Ghostty"`) {
+		t.Errorf("settings do not record this platform:\n%s", raw)
+	}
+
+	code, stdout, stderr = invoke("terminal")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "terminal: Ghostty") {
+		t.Errorf("stdout = %q", stdout)
+	}
+
+	code, stdout, stderr = invoke("list", "--json")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, `"terminalChoice": "Ghostty"`) {
+		t.Errorf("list does not expose the choice:\n%s", stdout)
+	}
+
+	code, stdout, stderr = invoke("terminal", "default")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "system default") {
+		t.Errorf("stdout = %q", stdout)
 	}
 }
 

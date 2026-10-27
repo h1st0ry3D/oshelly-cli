@@ -34,8 +34,8 @@ var terminalCandidates = []string{
 // It builds the same plan Start does, with an empty command, because the
 // choice of terminal does not depend on the command. `doctor` uses this so a
 // machine can be checked before the first click.
-func Resolve() (Terminal, error) {
-	plan, err := planFor("", currentEnv())
+func Resolve(configured string) (Terminal, error) {
+	plan, err := planFor("", configured, currentEnv())
 	if err != nil {
 		return Terminal{}, err
 	}
@@ -50,8 +50,8 @@ func Resolve() (Terminal, error) {
 // inherits the panel's pipe would keep that pipe open for as long as the
 // terminal lives, and the panel would wait for a command that had already
 // been handed off.
-func Start(command string) (Terminal, error) {
-	plan, err := planFor(command, currentEnv())
+func Start(command, configured string) (Terminal, error) {
+	plan, err := planFor(command, configured, currentEnv())
 	if err != nil {
 		return Terminal{}, err
 	}
@@ -70,12 +70,13 @@ func Start(command string) (Terminal, error) {
 
 // planFor chooses a terminal and the arguments that run the command in it.
 //
-// The order is the user's explicit choice first, then the desktop's own
-// launcher, then the standard default-terminal utility, then $TERMINAL, then
-// the list. Each of those means "this is the terminal this machine uses" in a
-// different way, and trying them in this order is how the answer stays right
-// on Omarchy, on another Wayland desktop and on a bare X session.
-func planFor(command string, e env) (Plan, error) {
+// The order is the environment override, then the saved choice, then the
+// desktop's own launcher, then the standard default-terminal utility, then
+// $TERMINAL, then the list. Each of those means "this is the terminal this
+// machine uses" in a different way, and trying them in this order is how the
+// answer stays right on Omarchy, on another Wayland desktop and on a bare X
+// session.
+func planFor(command, configured string, e env) (Plan, error) {
 	script := holdScript(command)
 
 	if override := strings.TrimSpace(e.getenv("OSHELLY_TERMINAL")); override != "" {
@@ -88,6 +89,17 @@ func planFor(command string, e env) (Plan, error) {
 				override)
 		}
 		return Plan{Program: prog, Args: terminalArgs(filepath.Base(prog), script), How: "OSHELLY_TERMINAL"}, nil
+	}
+
+	if configured != "" {
+		prog, ok := e.look(configured)
+		if !ok {
+			// A saved choice that no longer exists is a terminal the user
+			// asked for, so it should be named rather than replaced by the
+			// desktop default without a word.
+			return Plan{}, fmt.Errorf("the saved terminal %q is not an executable", configured)
+		}
+		return Plan{Program: prog, Args: terminalArgs(filepath.Base(prog), script), How: "saved setting"}, nil
 	}
 
 	// Omarchy's launcher is the desktop's answer: it starts the terminal

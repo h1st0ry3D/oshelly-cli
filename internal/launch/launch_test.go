@@ -30,7 +30,7 @@ func TestTheDesktopLauncherWinsOverTheFallbacks(t *testing.T) {
 			"ghostty":                 "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", e)
+	plan, err := planFor("echo hi", "", e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestXDGTerminalExecIsTheSecondChoice(t *testing.T) {
 			"ghostty":           "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", e)
+	plan, err := planFor("echo hi", "", e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestTerminalIsUsedBeforeTheFallbackList(t *testing.T) {
 			"ghostty":   "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", e)
+	plan, err := planFor("echo hi", "", e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestAStaleTerminalFallsThrough(t *testing.T) {
 		map[string]string{"TERMINAL": "gone"},
 		map[string]string{"foot": "/usr/bin/foot"})
 
-	plan, err := planFor("echo hi", e)
+	plan, err := planFor("echo hi", "", e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestOSHELLYTerminalOverridesEverything(t *testing.T) {
 			"omarchy-launch-terminal": "/usr/share/omarchy/bin/omarchy-launch-terminal",
 		})
 
-	plan, err := planFor("echo hi", e)
+	plan, err := planFor("echo hi", "", e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestAMissingOverrideIsAnError(t *testing.T) {
 		map[string]string{"OSHELLY_TERMINAL": "/opt/not-there"},
 		map[string]string{"ghostty": "/usr/bin/ghostty"})
 
-	_, err := planFor("echo hi", e)
+	_, err := planFor("echo hi", "", e)
 	if err == nil {
 		t.Fatal("a missing override was ignored")
 	}
@@ -132,8 +132,57 @@ func TestAMissingOverrideIsAnError(t *testing.T) {
 	}
 }
 
+// A saved choice is used before the desktop default, because it is the answer
+// the user asked for.
+func TestASavedTerminalWinsOverTheDesktopDefault(t *testing.T) {
+	e := testEnv(nil, map[string]string{
+		"ghostty":                 "/usr/bin/ghostty",
+		"omarchy-launch-terminal": "/usr/share/omarchy/bin/omarchy-launch-terminal",
+	})
+
+	plan, err := planFor("echo hi", "ghostty", e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.How != "saved setting" {
+		t.Errorf("chose %q, want the saved setting", plan.How)
+	}
+	if plan.Program != "/usr/bin/ghostty" {
+		t.Errorf("program = %q", plan.Program)
+	}
+}
+
+// The environment override is for a single session and wins over the saved
+// choice, so a test or a temporary run can change one invocation.
+func TestTheEnvironmentOverrideWinsOverTheSavedChoice(t *testing.T) {
+	e := testEnv(
+		map[string]string{"OSHELLY_TERMINAL": "foot"},
+		map[string]string{
+			"foot":    "/usr/bin/foot",
+			"ghostty": "/usr/bin/ghostty",
+		})
+
+	plan, err := planFor("echo hi", "ghostty", e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.How != "OSHELLY_TERMINAL" {
+		t.Errorf("chose %q, want the environment override", plan.How)
+	}
+}
+
+func TestAMissingSavedTerminalNamesTheChoice(t *testing.T) {
+	_, err := planFor("echo hi", "ghostty", testEnv(nil, nil))
+	if err == nil {
+		t.Fatal("a missing saved terminal was ignored")
+	}
+	if !strings.Contains(err.Error(), "ghostty") {
+		t.Errorf("error %q does not name the choice", err)
+	}
+}
+
 func TestNoTerminalIsReportedAsSuch(t *testing.T) {
-	_, err := planFor("echo hi", testEnv(nil, nil))
+	_, err := planFor("echo hi", "", testEnv(nil, nil))
 	if !errors.Is(err, ErrNoTerminal) {
 		t.Errorf("err = %v, want ErrNoTerminal", err)
 	}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/h1st0ry3D/oshelly-cli/internal/config"
 	"github.com/h1st0ry3D/oshelly-cli/internal/launch"
+	"github.com/h1st0ry3D/oshelly-cli/internal/settings"
 )
 
 // Exit codes. They are part of the contract with the panel and the menu bar
@@ -52,6 +53,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRun(args[1:], out, stderr)
 	case "edit":
 		return cmdEdit(args[1:], out, stderr)
+	case "terminal":
+		return cmdTerminal(args[1:], out, stderr)
 	case "doctor":
 		return cmdDoctor(args[1:], out, stderr)
 	case "path":
@@ -72,6 +75,7 @@ func usage(w io.Writer) {
   oshelly list [--json]   show the configured commands
   oshelly run <name>      launch one in the default terminal
   oshelly edit            open the config in the default editor
+  oshelly terminal [name] choose the terminal, or show the choice
   oshelly path            print the config file's location
   oshelly doctor          check the config, the terminal and the editor
 
@@ -89,6 +93,33 @@ Exit codes:
   2  no terminal or editor was found
   3  the terminal or editor was found but could not be started
 `)
+}
+
+// loadSettings reads the terminal choices, or says why it could not.
+func loadSettings(errOut io.Writer) (settings.Settings, bool) {
+	path, err := settings.Path()
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return settings.Default(), false
+	}
+	s, err := settings.Load(path)
+	if err != nil {
+		fmt.Fprintf(errOut, "settings not usable: %v\n", err)
+		return settings.Default(), false
+	}
+	return s, true
+}
+
+// loadSettingsSoft is for `list`, which is how the front ends draw their menu.
+// A broken settings file should not hide the command list or the Terminal
+// submenu; choosing a terminal writes a fresh file. `run` and `doctor` still
+// report the error rather than guessing.
+func loadSettingsSoft(errOut io.Writer) settings.Settings {
+	saved, ok := loadSettings(errOut)
+	if !ok {
+		return settings.Default()
+	}
+	return saved
 }
 
 // load reads the config, or says why it could not.
@@ -118,12 +149,13 @@ func load(errOut io.Writer) (config.Config, bool) {
 // a front end that wants to show what a row will run can do so without
 // reading the file itself.
 type listing struct {
-	Version  int            `json:"version"`
-	Path     string         `json:"path"`
-	Exists   bool           `json:"exists"`
-	Platform string         `json:"platform"`
-	Terminal string         `json:"terminal,omitempty"`
-	Commands []config.Entry `json:"commands"`
+	Version        int            `json:"version"`
+	Path           string         `json:"path"`
+	Exists         bool           `json:"exists"`
+	Platform       string         `json:"platform"`
+	Terminal       string         `json:"terminal,omitempty"`
+	TerminalChoice string         `json:"terminalChoice,omitempty"`
+	Commands       []config.Entry `json:"commands"`
 }
 
 func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
@@ -142,10 +174,11 @@ func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
 	if !ok {
 		return codeUsage
 	}
+	saved := loadSettingsSoft(errOut)
 
 	// A missing terminal is reported but not fatal here. The list is still
 	// worth reading, and `doctor` is where it becomes a failure.
-	terminal, terminalErr := launch.Resolve()
+	terminal, terminalErr := launch.Resolve(saved.Terminal())
 	terminalName := ""
 	if terminalErr == nil {
 		terminalName = terminal.How
@@ -156,12 +189,13 @@ func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
 			cfg.Entries = []config.Entry{}
 		}
 		raw, err := json.MarshalIndent(listing{
-			Version:  config.Version,
-			Path:     cfg.Path,
-			Exists:   cfg.Exists,
-			Platform: runtime.GOOS,
-			Terminal: terminalName,
-			Commands: cfg.Entries,
+			Version:        config.Version,
+			Path:           cfg.Path,
+			Exists:         cfg.Exists,
+			Platform:       runtime.GOOS,
+			Terminal:       terminalName,
+			TerminalChoice: saved.Terminal(),
+			Commands:       cfg.Entries,
 		}, "", "  ")
 		if err != nil {
 			fmt.Fprintln(errOut, err)
@@ -217,6 +251,11 @@ func cmdRun(args []string, out *bufio.Writer, errOut io.Writer) int {
 		return codeUsage
 	}
 
+	saved, ok := loadSettings(errOut)
+	if !ok {
+		return codeUsage
+	}
+
 	entry, found := cfg.Find(args[0])
 	if !found {
 		if names := cfg.Names(); len(names) > 0 {
@@ -229,7 +268,7 @@ func cmdRun(args []string, out *bufio.Writer, errOut io.Writer) int {
 		return codeUsage
 	}
 
-	_, err := launch.Start(entry.Command)
+	_, err := launch.Start(entry.Command, saved.Terminal())
 	if errors.Is(err, launch.ErrNoTerminal) {
 		fmt.Fprintln(errOut, "no terminal found: set OSHELLY_TERMINAL, "+
 			"or install xdg-terminal-exec or a terminal this knows about.")
@@ -241,6 +280,62 @@ func cmdRun(args []string, out *bufio.Writer, errOut io.Writer) int {
 	}
 
 	fmt.Fprintf(out, "Launched %q.\n", entry.Name)
+	return codeOK
+}
+
+// cmdTerminal shows or records which terminal to use on this platform.
+//
+// The choice is per platform because "Ghostty" is an application name on macOS
+// and a program name on Linux, and the two machines share one config folder.
+func cmdTerminal(args []string, out *bufio.Writer, errOut io.Writer) int {
+	if len(args) > 1 {
+		fmt.Fprintln(errOut, "terminal takes one name, or no argument to show the choice")
+		return codeUsage
+	}
+
+	path, err := settings.Path()
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return codeUsage
+	}
+	saved, loadErr := settings.Load(path)
+
+	if len(args) == 0 {
+		if loadErr != nil {
+			fmt.Fprintf(errOut, "settings not usable: %v\n", loadErr)
+			return codeUsage
+		}
+		choice := saved.Terminal()
+		if choice == "" {
+			choice = "system default"
+		}
+		fmt.Fprintf(out, "terminal: %s\n", choice)
+		return codeOK
+	}
+
+	// Setting a value is also the escape hatch for a settings file that will
+	// not parse: start from the defaults and write a valid file.
+	if loadErr != nil {
+		saved = settings.Default()
+		saved.SetPath(path)
+	}
+
+	value := strings.TrimSpace(args[0])
+	switch strings.ToLower(value) {
+	case "default", "system":
+		value = ""
+	}
+	saved.SetTerminal(value)
+	if err := saved.Save(); err != nil {
+		fmt.Fprintf(errOut, "could not save the terminal choice: %v\n", err)
+		return codeUsage
+	}
+
+	if value == "" {
+		fmt.Fprintf(out, "terminal = system default on %s\n", runtime.GOOS)
+	} else {
+		fmt.Fprintf(out, "terminal = %s on %s\n", value, runtime.GOOS)
+	}
 	return codeOK
 }
 
@@ -327,6 +422,10 @@ func cmdDoctor(args []string, out *bufio.Writer, errOut io.Writer) int {
 		fmt.Fprintf(out, "  NOT READY: %v\n", err)
 		return codeUsage
 	}
+	saved, ok := loadSettings(errOut)
+	if !ok {
+		return codeUsage
+	}
 
 	fmt.Fprintf(out, "config:   %s\n", cfg.Path)
 	if !cfg.Exists {
@@ -335,7 +434,7 @@ func cmdDoctor(args []string, out *bufio.Writer, errOut io.Writer) int {
 	fmt.Fprintf(out, "platform: %s\n", runtime.GOOS)
 	fmt.Fprintf(out, "commands: %d\n", len(cfg.Entries))
 
-	terminal, err := launch.Resolve()
+	terminal, err := launch.Resolve(saved.Terminal())
 	printProgram(out, "terminal", terminal.String(), err)
 	if err != nil {
 		fmt.Fprintln(out, "\nno terminal found. Set OSHELLY_TERMINAL, or install")

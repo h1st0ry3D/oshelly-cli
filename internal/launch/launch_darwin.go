@@ -9,37 +9,42 @@ import (
 	"strings"
 )
 
-// open is part of macOS and is the only way to start the user's default
-// terminal without knowing which terminal that is.
+// open is part of macOS and is the only supported way to start a terminal
+// from a process like this one, with or without naming the application.
 const open = "/usr/bin/open"
 
 // Resolve reports how a command would be opened, without writing or starting
 // anything. `doctor` uses this.
-func Resolve() (Terminal, error) {
+func Resolve(configured string) (Terminal, error) {
 	if _, err := os.Stat(open); err != nil {
 		return Terminal{}, err
 	}
-	if app := strings.TrimSpace(os.Getenv("OSHELLY_TERMINAL")); app != "" {
+	app := strings.TrimSpace(os.Getenv("OSHELLY_TERMINAL"))
+	if app == "" {
+		app = strings.TrimSpace(configured)
+	}
+	if app != "" {
 		return Terminal{Path: open, How: "open -a " + app}, nil
 	}
 	return Terminal{Path: open, How: "the default .command handler"}, nil
 }
 
-// Start writes the command into a .command file and lets the default handler
-// for that file open it.
+// Start writes the command into a .command file and asks `open` to run it.
 //
 // macOS has no system-wide "default terminal" setting to read, but it does
-// have a default application for .command files, which is exactly the same
-// question: what should run a shell script? `open` asks Launch Services, so
-// Terminal, iTerm or anything else registered for the type is what the user
-// gets. OSHELLY_TERMINAL overrides it with an application name or a bundle
-// path when that default is not the wanted one.
+// have a default application for .command files. `open` asks Launch Services,
+// so Terminal, iTerm or anything else registered for the type is what the user
+// gets. A saved choice or OSHELLY_TERMINAL names an application instead.
+//
+// Naming an application still works because `open -a Ghostty <script>` hands
+// the file to Ghostty's openFile handler, which runs it. Ghostty's own CLI
+// cannot start a terminal on macOS, so `open` is the supported path there.
 //
 // The file is left in a temporary directory. Deleting it immediately would be
 // a race with the terminal that has not read it yet, and the OS cleans up its
 // own temporary directory.
-func Start(command string) (Terminal, error) {
-	terminal, err := Resolve()
+func Start(command, configured string) (Terminal, error) {
+	terminal, err := Resolve(configured)
 	if err != nil {
 		return Terminal{}, err
 	}
@@ -54,8 +59,12 @@ func Start(command string) (Terminal, error) {
 		return Terminal{}, err
 	}
 
+	app := strings.TrimSpace(os.Getenv("OSHELLY_TERMINAL"))
+	if app == "" {
+		app = strings.TrimSpace(configured)
+	}
 	args := []string{}
-	if app := strings.TrimSpace(os.Getenv("OSHELLY_TERMINAL")); app != "" {
+	if app != "" {
 		args = append(args, "-a", app)
 	}
 	args = append(args, path)
