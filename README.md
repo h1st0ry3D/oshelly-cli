@@ -103,9 +103,14 @@ the command list. A Mac and a Linux machine can share the file because
 "Ghostty" is an application name on one and a program name on the other.
 
 On macOS, a saved application is passed to `open -a`, which hands the
-`.command` file to that application. Ghostty runs it through its own file
-handler, so no Ghostty-specific command line is needed. On Linux, the saved
-name is looked up like any other terminal.
+`.command` file to that application. Ghostty is the exception: its file handler
+asks for confirmation every time a `.command` file is opened, and Ghostty has
+no setting to turn that off. For Ghostty, `oshelly` starts a new Ghostty
+instance with `--initial-command` instead. That runs the script without the
+dialog and quits the instance when its window closes. The running Ghostty is
+left alone, so a second Dock icon may appear until the window closes.
+
+On Linux, the saved name is looked up like any other terminal.
 
 On Linux, `OSHELLY_TERMINAL` is an executable path or name. On macOS it is an
 application name or bundle path, passed to `open -a`, and the default is

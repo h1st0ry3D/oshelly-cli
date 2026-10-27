@@ -24,6 +24,9 @@ func Resolve(configured string) (Terminal, error) {
 		app = strings.TrimSpace(configured)
 	}
 	if app != "" {
+		if isGhostty(app) {
+			return Terminal{Path: open, How: "Ghostty, new instance"}, nil
+		}
 		return Terminal{Path: open, How: "open -a " + app}, nil
 	}
 	return Terminal{Path: open, How: "the default .command handler"}, nil
@@ -36,9 +39,10 @@ func Resolve(configured string) (Terminal, error) {
 // so Terminal, iTerm or anything else registered for the type is what the user
 // gets. A saved choice or OSHELLY_TERMINAL names an application instead.
 //
-// Naming an application still works because `open -a Ghostty <script>` hands
-// the file to Ghostty's openFile handler, which runs it. Ghostty's own CLI
-// cannot start a terminal on macOS, so `open` is the supported path there.
+// Naming an application gets `open -a <app> <script>`, which hands the file to
+// that application. Ghostty is the exception: see openArgs, because its file
+// handler asks for confirmation every time. Ghostty's own CLI cannot start a
+// terminal on macOS, so `open` is the supported path either way.
 //
 // The file is left in a temporary directory. Deleting it immediately would be
 // a race with the terminal that has not read it yet, and the OS cleans up its
@@ -63,11 +67,7 @@ func Start(command, configured string) (Terminal, error) {
 	if app == "" {
 		app = strings.TrimSpace(configured)
 	}
-	args := []string{}
-	if app != "" {
-		args = append(args, "-a", app)
-	}
-	args = append(args, path)
+	args := openArgs(app, path)
 
 	cmd := exec.Command(open, args...)
 	cmd.Env = os.Environ()

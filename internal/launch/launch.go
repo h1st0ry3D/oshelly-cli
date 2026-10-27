@@ -150,6 +150,45 @@ func executable(path string) (string, bool) {
 	return path, true
 }
 
+// openArgs is how `open` is told to run the script.
+//
+// Ghostty asks for confirmation every time a .command file is opened through
+// its openFile handler, and there is no setting to turn that off. Passing the
+// script through --initial-command keeps it out of that path: the argument is
+// an option rather than a document, so AppKit never hands Ghostty a file to
+// execute. The price is a new Ghostty instance, which quits when the window
+// closes. The running instance is left alone.
+func openArgs(app, scriptPath string) []string {
+	if isGhostty(app) {
+		appFlag := "-na"
+		if strings.EqualFold(strings.TrimSpace(app), "com.mitchellh.ghostty") {
+			appFlag = "-nb"
+		}
+		return []string{
+			appFlag, app,
+			"--args",
+			"--window-save-state=never",
+			"--quit-after-last-window-closed=true",
+			"--initial-command=" + scriptPath,
+		}
+	}
+	if app != "" {
+		return []string{"-a", app, scriptPath}
+	}
+	return []string{scriptPath}
+}
+
+// isGhostty accepts an application name or a bundle path. The case varies
+// between "Ghostty", "ghostty" and a path ending in "Ghostty.app".
+func isGhostty(app string) bool {
+	app = strings.TrimSpace(app)
+	if strings.EqualFold(app, "com.mitchellh.ghostty") {
+		return true
+	}
+	base := strings.TrimSuffix(app, ".app")
+	return strings.EqualFold(filepath.Base(base), "Ghostty")
+}
+
 // terminalArgs is how a named terminal is told to run a command.
 //
 // Terminals disagree about this flag, and a wrong one is not a cosmetic

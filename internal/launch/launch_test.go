@@ -264,3 +264,70 @@ func TestLookupRefusesANonExecutable(t *testing.T) {
 		t.Errorf("lookup found %q, which is not executable", got)
 	}
 }
+
+// Ghostty must not be handed a bare .command path, because its openFile handler
+// asks for confirmation every time. The path travels inside --initial-command.
+func TestGhosttyUsesInitialCommandInsteadOfOpeningTheFile(t *testing.T) {
+	script := "/private/var/folders/x/T/oshelly-1/run.command"
+	got := openArgs("Ghostty", script)
+	want := []string{
+		"-na", "Ghostty",
+		"--args",
+		"--window-save-state=never",
+		"--quit-after-last-window-closed=true",
+		"--initial-command=" + script,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %#v, want %#v", got, want)
+		}
+	}
+	for _, arg := range got {
+		if arg == script {
+			t.Error("the script is a bare argument, which opens the Ghostty confirmation dialog")
+		}
+	}
+}
+
+func TestGhosttyBundleIDUsesTheBundleFlag(t *testing.T) {
+	got := openArgs("com.mitchellh.ghostty", "/tmp/run.command")
+	if len(got) < 2 || got[0] != "-nb" || got[1] != "com.mitchellh.ghostty" {
+		t.Errorf("args = %#v, want -nb with the bundle id", got)
+	}
+}
+
+func TestOtherApplicationsGetTheScriptPath(t *testing.T) {
+	script := "/private/var/folders/x/T/oshelly-1/run.command"
+	got := openArgs("iTerm", script)
+	if len(got) != 3 || got[0] != "-a" || got[1] != "iTerm" || got[2] != script {
+		t.Errorf("args = %#v", got)
+	}
+}
+
+func TestTheDefaultHandlerGetsJustTheScriptPath(t *testing.T) {
+	got := openArgs("", "/tmp/run.command")
+	if len(got) != 1 || got[0] != "/tmp/run.command" {
+		t.Errorf("args = %#v", got)
+	}
+}
+
+func TestGhosttyNamesAreRecognised(t *testing.T) {
+	cases := map[string]bool{
+		"Ghostty":                   true,
+		"ghostty":                   true,
+		"Ghostty.app":               true,
+		"/Applications/Ghostty.app": true,
+		"/Applications/Ghostty":     true,
+		"com.mitchellh.ghostty":     true,
+		"iTerm":                     false,
+		"":                          false,
+	}
+	for name, want := range cases {
+		if got := isGhostty(name); got != want {
+			t.Errorf("isGhostty(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
