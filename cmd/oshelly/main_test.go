@@ -162,6 +162,59 @@ func TestListSurvivesBrokenSettings(t *testing.T) {
 	}
 }
 
+func TestCloseSettingIsStoredAndListed(t *testing.T) {
+	configFile(t, "Update: true\nOther: true\n")
+
+	code, stdout, stderr := invoke("set", "close", "Update", "on")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "close after run = on") {
+		t.Errorf("stdout = %q", stdout)
+	}
+
+	code, stdout, stderr = invoke("list", "--json")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	var got listing
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Commands) != 2 {
+		t.Fatalf("got %d commands", len(got.Commands))
+	}
+	if !got.Commands[0].Close {
+		t.Error("Update is not marked to close")
+	}
+	if got.Commands[1].Close {
+		t.Error("Other is marked to close")
+	}
+
+	code, stdout, stderr = invoke("list")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "terminal closes after this") {
+		t.Errorf("the list does not say Update closes:\n%s", stdout)
+	}
+
+	code, _, stderr = invoke("set", "close", "Update", "off")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	code, stdout, stderr = invoke("list", "--json")
+	if code != codeOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Commands[0].Close {
+		t.Error("Update is still marked to close")
+	}
+}
+
 func TestTerminalChoiceIsStoredForThisPlatform(t *testing.T) {
 	path := configFile(t, "Restart: true\n")
 

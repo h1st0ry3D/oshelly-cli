@@ -35,7 +35,7 @@ var terminalCandidates = []string{
 // choice of terminal does not depend on the command. `doctor` uses this so a
 // machine can be checked before the first click.
 func Resolve(configured string) (Terminal, error) {
-	plan, err := planFor("", configured, currentEnv())
+	plan, err := planFor("", configured, true, currentEnv())
 	if err != nil {
 		return Terminal{}, err
 	}
@@ -50,8 +50,8 @@ func Resolve(configured string) (Terminal, error) {
 // inherits the panel's pipe would keep that pipe open for as long as the
 // terminal lives, and the panel would wait for a command that had already
 // been handed off.
-func Start(command, configured string) (Terminal, error) {
-	plan, err := planFor(command, configured, currentEnv())
+func Start(command, configured string, keepOpen bool) (Terminal, error) {
+	plan, err := planFor(command, configured, keepOpen, currentEnv())
 	if err != nil {
 		return Terminal{}, err
 	}
@@ -76,8 +76,8 @@ func Start(command, configured string) (Terminal, error) {
 // machine uses" in a different way, and trying them in this order is how the
 // answer stays right on Omarchy, on another Wayland desktop and on a bare X
 // session.
-func planFor(command, configured string, e env) (Plan, error) {
-	script := holdScript(command)
+func planFor(command, configured string, keepOpen bool, e env) (Plan, error) {
+	script := wrapper(command, keepOpen)
 
 	if override := strings.TrimSpace(e.getenv("OSHELLY_TERMINAL")); override != "" {
 		prog, ok := e.look(override)

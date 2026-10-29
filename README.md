@@ -42,6 +42,10 @@ point of this file is to be small enough to read at a glance.
 The file is read every time a command is launched. A change takes effect the
 next time the panel or the menu is opened; nothing needs restarting.
 
+The terminal stays open after a command by default. The per-command choice to
+close it is not written into this file, because the file is only names and
+commands. It lives in `settings.json` and is toggled with `oshelly set close`.
+
 ## Commands
 
 | Command | What it does |
@@ -51,6 +55,7 @@ next time the panel or the menu is opened; nothing needs restarting.
 | `oshelly run <name>` | Launch one command in the default terminal |
 | `oshelly edit` | Open the config in the default editor |
 | `oshelly terminal [name]` | Show or save the terminal used on this platform |
+| `oshelly set close <name> <on/off>` | Close the terminal after this command |
 | `oshelly path` | Print the config file's location |
 | `oshelly doctor` | Check the file parses and the terminal and editor can be found |
 
@@ -62,6 +67,10 @@ output anyway.
 `oshelly edit` creates the config with a commented header if it does not exist
 yet, and opens it without parsing it. A file that will not parse is exactly the
 file someone needs to edit.
+
+`oshelly set close "Update" on` makes the wrapper exit after the command instead
+of leaving an interactive shell. The terminal then closes the session according
+to its own exit setting. `off` is the default and leaves the terminal open.
 
 ### Exit codes
 

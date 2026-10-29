@@ -7,4 +7,4 @@ package launch
 // saying so is better than a build that fails with a missing symbol.
 func Resolve(string) (Terminal, error) { return Terminal{}, ErrUnsupported }
 
-func Start(string, string) (Terminal, error) { return Terminal{}, ErrUnsupported }
+func Start(string, string, bool) (Terminal, error) { return Terminal{}, ErrUnsupported }

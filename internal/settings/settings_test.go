@@ -102,3 +102,53 @@ func TestPathSitsNextToTheCommandList(t *testing.T) {
 		t.Errorf("Path = %q, want %q", path, want)
 	}
 }
+
+func TestCloseAfterIsStoredAndCleared(t *testing.T) {
+	s := Default()
+	s.SetCloseAfter("Update", true)
+	s.SetCloseAfter("Sync", true)
+	if !s.CloseAfter("Update") || !s.CloseAfter("Sync") {
+		t.Errorf("close = %#v, want both commands", s.Close)
+	}
+	s.SetCloseAfter("Update", false)
+	if s.CloseAfter("Update") {
+		t.Error("Update is still marked to close")
+	}
+	if !s.CloseAfter("Sync") {
+		t.Error("Sync lost its setting")
+	}
+}
+
+func TestCloseAfterCleansNamesAndSorts(t *testing.T) {
+	s := Default()
+	s.Close = []string{"  Zeta ", "Alpha", "Alpha", ""}
+	if err := s.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Alpha", "Zeta"}
+	if len(s.Close) != len(want) {
+		t.Fatalf("close = %#v, want %#v", s.Close, want)
+	}
+	for i := range want {
+		if s.Close[i] != want[i] {
+			t.Errorf("close[%d] = %q, want %q", i, s.Close[i], want[i])
+		}
+	}
+}
+
+func TestCloseAfterSurvivesSaveAndLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s := Default()
+	s.SetPath(path)
+	s.SetCloseAfter("Update", true)
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.CloseAfter("Update") {
+		t.Errorf("close = %#v, want Update", got.Close)
+	}
+}

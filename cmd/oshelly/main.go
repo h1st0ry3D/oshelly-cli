@@ -55,6 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdEdit(args[1:], out, stderr)
 	case "terminal":
 		return cmdTerminal(args[1:], out, stderr)
+	case "set":
+		return cmdSet(args[1:], out, stderr)
 	case "doctor":
 		return cmdDoctor(args[1:], out, stderr)
 	case "path":
@@ -76,6 +78,8 @@ func usage(w io.Writer) {
   oshelly run <name>      launch one in the default terminal
   oshelly edit            open the config in the default editor
   oshelly terminal [name] choose the terminal, or show the choice
+  oshelly set close <name> <on|off>
+                          close the terminal after this command
   oshelly path            print the config file's location
   oshelly doctor          check the config, the terminal and the editor
 
@@ -86,6 +90,8 @@ The config is ~/.config/oshelly/oshelly.conf, one command per line:
 A line that starts with # is a comment. The first colon separates the name
 from the command, so a name cannot contain a colon. Everything after that
 colon is the command, unchanged.
+
+The terminal stays open after a command unless set close is on for it.
 
 Exit codes:
   0  done
@@ -149,13 +155,21 @@ func load(errOut io.Writer) (config.Config, bool) {
 // a front end that wants to show what a row will run can do so without
 // reading the file itself.
 type listing struct {
-	Version        int            `json:"version"`
-	Path           string         `json:"path"`
-	Exists         bool           `json:"exists"`
-	Platform       string         `json:"platform"`
-	Terminal       string         `json:"terminal,omitempty"`
-	TerminalChoice string         `json:"terminalChoice,omitempty"`
-	Commands       []config.Entry `json:"commands"`
+	Version        int              `json:"version"`
+	Path           string           `json:"path"`
+	Exists         bool             `json:"exists"`
+	Platform       string           `json:"platform"`
+	Terminal       string           `json:"terminal,omitempty"`
+	TerminalChoice string           `json:"terminalChoice,omitempty"`
+	Commands       []listingCommand `json:"commands"`
+}
+
+// listingCommand is one command as a front end sees it: the file's name and
+// command, plus the setting that decides whether its terminal closes.
+type listingCommand struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	Close   bool   `json:"close"`
 }
 
 func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
@@ -184,10 +198,16 @@ func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
 		terminalName = terminal.How
 	}
 
+	commands := make([]listingCommand, 0, len(cfg.Entries))
+	for _, entry := range cfg.Entries {
+		commands = append(commands, listingCommand{
+			Name:    entry.Name,
+			Command: entry.Command,
+			Close:   saved.CloseAfter(entry.Name),
+		})
+	}
+
 	if asJSON {
-		if cfg.Entries == nil {
-			cfg.Entries = []config.Entry{}
-		}
 		raw, err := json.MarshalIndent(listing{
 			Version:        config.Version,
 			Path:           cfg.Path,
@@ -195,7 +215,7 @@ func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
 			Platform:       runtime.GOOS,
 			Terminal:       terminalName,
 			TerminalChoice: saved.Terminal(),
-			Commands:       cfg.Entries,
+			Commands:       commands,
 		}, "", "  ")
 		if err != nil {
 			fmt.Fprintln(errOut, err)
@@ -222,9 +242,12 @@ func cmdList(args []string, out *bufio.Writer, errOut io.Writer) int {
 	}
 
 	fmt.Fprintln(out)
-	for _, entry := range cfg.Entries {
+	for _, entry := range commands {
 		fmt.Fprintf(out, "  %s\n", entry.Name)
 		fmt.Fprintf(out, "    %s\n", entry.Command)
+		if entry.Close {
+			fmt.Fprintln(out, "    (terminal closes after this)")
+		}
 	}
 	return codeOK
 }
@@ -268,7 +291,7 @@ func cmdRun(args []string, out *bufio.Writer, errOut io.Writer) int {
 		return codeUsage
 	}
 
-	_, err := launch.Start(entry.Command, saved.Terminal())
+	_, err := launch.Start(entry.Command, saved.Terminal(), !saved.CloseAfter(entry.Name))
 	if errors.Is(err, launch.ErrNoTerminal) {
 		fmt.Fprintln(errOut, "no terminal found: set OSHELLY_TERMINAL, "+
 			"or install xdg-terminal-exec or a terminal this knows about.")
@@ -337,6 +360,63 @@ func cmdTerminal(args []string, out *bufio.Writer, errOut io.Writer) int {
 		fmt.Fprintf(out, "terminal = %s on %s\n", value, runtime.GOOS)
 	}
 	return codeOK
+}
+
+// cmdSet records one per-command setting. The only setting today is whether
+// the terminal closes after the command, but the command shape leaves room for
+// another without inventing a new verb.
+func cmdSet(args []string, out *bufio.Writer, errOut io.Writer) int {
+	if len(args) != 3 || args[0] != "close" {
+		fmt.Fprintln(errOut, "set takes `close <name> <on|off>`")
+		return codeUsage
+	}
+	on, ok := parseOnOff(args[2])
+	if !ok {
+		fmt.Fprintln(errOut, "close takes on or off")
+		return codeUsage
+	}
+	name := config.CleanName(args[1])
+	if name == "" {
+		fmt.Fprintln(errOut, "close needs a command name")
+		return codeUsage
+	}
+
+	path, err := settings.Path()
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return codeUsage
+	}
+	saved, loadErr := settings.Load(path)
+	if loadErr != nil {
+		// A setting command is also an escape hatch from a settings file that
+		// will not parse: start from the defaults and write a valid file.
+		saved = settings.Default()
+		saved.SetPath(path)
+	}
+	saved.SetCloseAfter(name, on)
+	if err := saved.Save(); err != nil {
+		fmt.Fprintf(errOut, "could not save the setting: %v\n", err)
+		return codeUsage
+	}
+
+	word := "off"
+	if on {
+		word = "on"
+	}
+	fmt.Fprintf(out, "close after run = %s for %q\n", word, name)
+	return codeOK
+}
+
+// parseOnOff reads the two words a boolean setting is written with. Anything
+// else is refused, so a typo cannot silently turn a setting off.
+func parseOnOff(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on", "true", "yes", "1":
+		return true, true
+	case "off", "false", "no", "0":
+		return false, true
+	}
+	return false, false
 }
 
 // cmdEdit opens the config in the user's editor.

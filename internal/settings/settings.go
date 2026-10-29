@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/h1st0ry3D/oshelly-cli/internal/config"
@@ -28,6 +29,9 @@ type Settings struct {
 	// Terminals maps a platform to the terminal to use there. An absent entry
 	// means choose one automatically, which is the same as never having set it.
 	Terminals map[string]string `json:"terminals,omitempty"`
+	// Close lists the commands whose terminal closes after they finish. The
+	// default is to keep the terminal open, so only the exceptions are stored.
+	Close []string `json:"close,omitempty"`
 
 	path string
 }
@@ -72,6 +76,42 @@ func Load(path string) (Settings, error) {
 // Terminal is the choice for the platform this is running on, or empty when
 // none has been made.
 func (s Settings) Terminal() string { return s.Terminals[runtime.GOOS] }
+
+// CloseAfter reports whether a command closes its terminal when it finishes.
+func (s Settings) CloseAfter(name string) bool {
+	name = config.CleanName(name)
+	for _, entry := range s.Close {
+		if entry == name {
+			return true
+		}
+	}
+	return false
+}
+
+// SetCloseAfter records whether a command closes its terminal. An empty name
+// is ignored because it cannot match a command.
+func (s *Settings) SetCloseAfter(name string, close bool) {
+	name = config.CleanName(name)
+	if name == "" {
+		return
+	}
+	found := -1
+	for i, entry := range s.Close {
+		if entry == name {
+			found = i
+			break
+		}
+	}
+	if close {
+		if found < 0 {
+			s.Close = append(s.Close, name)
+		}
+		return
+	}
+	if found >= 0 {
+		s.Close = append(s.Close[:found], s.Close[found+1:]...)
+	}
+}
 
 // SetTerminal records a choice for this platform. An empty value clears it.
 func (s *Settings) SetTerminal(value string) {
@@ -151,6 +191,22 @@ func (s *Settings) normalize() error {
 	}
 	if len(s.Terminals) == 0 {
 		s.Terminals = nil
+	}
+
+	seen := make(map[string]bool, len(s.Close))
+	closeNames := s.Close[:0]
+	for _, name := range s.Close {
+		name = config.CleanName(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		closeNames = append(closeNames, name)
+	}
+	sort.Strings(closeNames)
+	s.Close = closeNames
+	if len(s.Close) == 0 {
+		s.Close = nil
 	}
 	return nil
 }

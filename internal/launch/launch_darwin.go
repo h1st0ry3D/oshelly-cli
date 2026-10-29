@@ -47,7 +47,7 @@ func Resolve(configured string) (Terminal, error) {
 // The file is left in a temporary directory. Deleting it immediately would be
 // a race with the terminal that has not read it yet, and the OS cleans up its
 // own temporary directory.
-func Start(command, configured string) (Terminal, error) {
+func Start(command, configured string, keepOpen bool) (Terminal, error) {
 	terminal, err := Resolve(configured)
 	if err != nil {
 		return Terminal{}, err
@@ -58,7 +58,7 @@ func Start(command, configured string) (Terminal, error) {
 		return Terminal{}, err
 	}
 	path := filepath.Join(dir, "run.command")
-	script := "#!/bin/sh\n" + holdScript(command)
+	script := "#!/bin/sh\n" + wrapper(command, keepOpen)
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		return Terminal{}, err
 	}

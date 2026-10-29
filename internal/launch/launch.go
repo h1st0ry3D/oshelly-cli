@@ -86,22 +86,26 @@ func currentEnv() env {
 	return env{getenv: os.Getenv, look: lookup}
 }
 
-// holdScript wraps a command so the terminal stays open after it finishes.
+// wrapper wraps a command so the terminal can stay open or close after it.
 //
-// Without this a script that prints an error would close the terminal before
-// the error could be read, which is the failure this wrapper prevents. The
-// command is run first and unchanged; the status line and the interactive
-// shell after it are what the person sees next.
+// With keepOpen true, the command runs, prints its status, and leaves the
+// terminal at an interactive shell. A failed script stays readable. With
+// keepOpen false, the wrapper exits instead, and the terminal closes the
+// session. The exit is explicit and clean so a terminal profile that closes on
+// a clean exit does close.
 //
 // It runs under `sh` rather than the login shell because this is a wrapper,
 // not the command: `sh` is on every machine and has the same syntax for the
-// four lines below. The shell that opens afterwards is $SHELL, which is the
-// user's own.
-func holdScript(command string) string {
-	return command + "\n" +
+// lines below. The shell that opens afterwards is $SHELL, which is the user's
+// own.
+func wrapper(command string, keepOpen bool) string {
+	script := command + "\n" +
 		"oshelly_status=$?\n" +
-		"printf '\\n[oshelly] exited %s\\n' \"$oshelly_status\"\n" +
-		"exec \"${SHELL:-/bin/sh}\" -i\n"
+		"printf '\\n[oshelly] exited %s\\n' \"$oshelly_status\"\n"
+	if keepOpen {
+		return script + "exec \"${SHELL:-/bin/sh}\" -i\n"
+	}
+	return script + "exit 0\n"
 }
 
 // lookup finds a program without trusting PATH alone.

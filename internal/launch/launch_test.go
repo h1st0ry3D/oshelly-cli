@@ -30,7 +30,7 @@ func TestTheDesktopLauncherWinsOverTheFallbacks(t *testing.T) {
 			"ghostty":                 "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", "", e)
+	plan, err := planFor("echo hi", "", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestXDGTerminalExecIsTheSecondChoice(t *testing.T) {
 			"ghostty":           "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", "", e)
+	plan, err := planFor("echo hi", "", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestTerminalIsUsedBeforeTheFallbackList(t *testing.T) {
 			"ghostty":   "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", "", e)
+	plan, err := planFor("echo hi", "", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestAStaleTerminalFallsThrough(t *testing.T) {
 		map[string]string{"TERMINAL": "gone"},
 		map[string]string{"foot": "/usr/bin/foot"})
 
-	plan, err := planFor("echo hi", "", e)
+	plan, err := planFor("echo hi", "", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestOSHELLYTerminalOverridesEverything(t *testing.T) {
 			"omarchy-launch-terminal": "/usr/share/omarchy/bin/omarchy-launch-terminal",
 		})
 
-	plan, err := planFor("echo hi", "", e)
+	plan, err := planFor("echo hi", "", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestAMissingOverrideIsAnError(t *testing.T) {
 		map[string]string{"OSHELLY_TERMINAL": "/opt/not-there"},
 		map[string]string{"ghostty": "/usr/bin/ghostty"})
 
-	_, err := planFor("echo hi", "", e)
+	_, err := planFor("echo hi", "", true, e)
 	if err == nil {
 		t.Fatal("a missing override was ignored")
 	}
@@ -140,7 +140,7 @@ func TestASavedTerminalWinsOverTheDesktopDefault(t *testing.T) {
 		"omarchy-launch-terminal": "/usr/share/omarchy/bin/omarchy-launch-terminal",
 	})
 
-	plan, err := planFor("echo hi", "ghostty", e)
+	plan, err := planFor("echo hi", "ghostty", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestTheEnvironmentOverrideWinsOverTheSavedChoice(t *testing.T) {
 			"ghostty": "/usr/bin/ghostty",
 		})
 
-	plan, err := planFor("echo hi", "ghostty", e)
+	plan, err := planFor("echo hi", "ghostty", true, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestTheEnvironmentOverrideWinsOverTheSavedChoice(t *testing.T) {
 }
 
 func TestAMissingSavedTerminalNamesTheChoice(t *testing.T) {
-	_, err := planFor("echo hi", "ghostty", testEnv(nil, nil))
+	_, err := planFor("echo hi", "ghostty", true, testEnv(nil, nil))
 	if err == nil {
 		t.Fatal("a missing saved terminal was ignored")
 	}
@@ -182,7 +182,7 @@ func TestAMissingSavedTerminalNamesTheChoice(t *testing.T) {
 }
 
 func TestNoTerminalIsReportedAsSuch(t *testing.T) {
-	_, err := planFor("echo hi", "", testEnv(nil, nil))
+	_, err := planFor("echo hi", "", true, testEnv(nil, nil))
 	if !errors.Is(err, ErrNoTerminal) {
 		t.Errorf("err = %v, want ErrNoTerminal", err)
 	}
@@ -225,7 +225,7 @@ func TestEachTerminalGetsTheFlagItUses(t *testing.T) {
 // error would close before the error could be read. The command itself has to
 // stay first and unchanged, because it is the user's own line.
 func TestTheWrapperKeepsTheTerminalOpen(t *testing.T) {
-	script := holdScript("echo hi")
+	script := wrapper("echo hi", true)
 	if !strings.HasPrefix(script, "echo hi\n") {
 		t.Errorf("the command is not the first line: %q", script)
 	}
@@ -233,6 +233,37 @@ func TestTheWrapperKeepsTheTerminalOpen(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Errorf("wrapper %q does not contain %q", script, want)
 		}
+	}
+}
+
+// With the close toggle on, the wrapper ends the shell instead of opening a
+// new one. The clean exit is what lets a terminal profile that closes on a
+// clean exit close the window.
+func TestTheWrapperCanCloseTheTerminal(t *testing.T) {
+	script := wrapper("echo hi", false)
+	if !strings.HasPrefix(script, "echo hi\n") {
+		t.Errorf("the command is not the first line: %q", script)
+	}
+	if strings.Contains(script, "exec") {
+		t.Errorf("the close wrapper still opens a shell: %q", script)
+	}
+	if !strings.Contains(script, "exit 0") {
+		t.Errorf("the close wrapper does not exit: %q", script)
+	}
+}
+
+func TestTheCloseSettingReachesTheTerminalScript(t *testing.T) {
+	e := testEnv(nil, map[string]string{"xdg-terminal-exec": "/usr/bin/xdg-terminal-exec"})
+	plan, err := planFor("echo hi", "", false, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := plan.Args[2]
+	if strings.Contains(script, "exec") {
+		t.Errorf("script still opens a shell: %q", script)
+	}
+	if !strings.Contains(script, "exit 0") {
+		t.Errorf("script does not close: %q", script)
 	}
 }
 
